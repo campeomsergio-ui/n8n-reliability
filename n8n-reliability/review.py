@@ -18,9 +18,14 @@ def is_write(n):
 VOLATILE_KEY = ("$execution", "$now", "$today", "$runindex", "math.random", "$randomint", "uuid", "date.now")
 
 
-def stable(value):
+# Retry-on-fail retries inside the same execution, so $execution/$runIndex repeat across tries;
+# only values re-drawn per attempt break the key there.
+PER_TRY_VOLATILE = ("$now", "$today", "math.random", "$randomint", "uuid", "date.now")
+
+
+def stable(value, tokens=VOLATILE_KEY):
     v = str(value or "").lower()
-    return bool(v.strip()) and not any(t in v for t in VOLATILE_KEY)
+    return bool(v.strip()) and not any(t in v for t in tokens)
 
 
 def has_idempotency(n):
@@ -42,11 +47,11 @@ def upsert_key(n):
     return " ".join(str(vals.get(c, "")) for c in match) if match else None
 
 
-def replay_safe_op(n):
+def replay_safe_op(n, tokens=VOLATILE_KEY):
     op = str((n.get("parameters") or {}).get("operation", "")).lower()
     if op == "upsert":
         key = upsert_key(n)
-        return key is None or stable(key)  # no visible key: trust the node's own matching
+        return key is None or stable(key, tokens)  # no visible key: trust the node's own matching
     return op in REPLAY_SAFE_OPS
 
 
@@ -101,7 +106,7 @@ def review(wf):
     nodes = wf.get("nodes", [])
     by_name = {n["name"]: n for n in nodes}
     conns = wf.get("connections", {})
-    writes = [n for n in nodes if is_write(n)]
+    writes = [n for n in nodes if is_write(n) and not n.get("disabled")]
     findings = []
 
     def add(rule, sev, n, msg, fix):
@@ -142,9 +147,8 @@ def review(wf):
                     "Put a Respond to Webhook node at the end of every route, including error and filtered branches.")
 
     for n in writes:
-        op = str((n.get("parameters") or {}).get("operation", "")).lower()
         guarded = has_idempotency(n) or replay_safe_op(n)
-        if n.get("retryOnFail") and not (guarded or op in REPLAY_SAFE_OPS):
+        if n.get("retryOnFail") and not (has_idempotency(n) or replay_safe_op(n, PER_TRY_VOLATILE)):
             add("RETRY_WRITE", "high", n, f"Retry on fail is on (max tries {n.get('maxTries', 3)}) for a write with no idempotency key. A timeout after a successful write can create duplicates.",
                 "Send an Idempotency-Key derived from a stable event ID, or switch to upsert. If neither is possible, turn retry off.")
         triggers = [a for a in ancestors(n["name"], conns) if a in by_name and is_event_trigger(by_name[a])]
@@ -179,7 +183,7 @@ def main(argv):
         try:
             with open(path, encoding="utf-8") as f:
                 wf = json.load(f)
-            if not isinstance(wf, dict) or not isinstance(wf.get("nodes", []), list):
+            if not isinstance(wf, dict) or not isinstance(wf.get("nodes"), list):
                 raise ValueError("not an n8n workflow export (expected an object with a nodes list)")
             fs = review(wf)
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
@@ -191,9 +195,11 @@ def main(argv):
     for r in results if fmt != "json" else []:
         if fmt == "github":
             lvl = {"high": "error", "medium": "warning"}
+            data = lambda t: str(t).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            prop = lambda t: data(t).replace(":", "%3A").replace(",", "%2C")
             for x in r["findings"]:
-                where = f" [{x['node']}]" if x["node"] else ""
-                print(f"::{lvl.get(x['severity'], 'notice')} file={r['file']},title=n8n-reliability {x['rule']}::{x['finding']}{where} Fix: {x['fix']}")
+                where = data(f" [{x['node']}]") if x["node"] else ""
+                print(f"::{lvl.get(x['severity'], 'notice')} file={prop(r['file'])},title=n8n-reliability {x['rule']}::{data(x['finding'])}{where} Fix: {data(x['fix'])}")
             continue
         print(f"## {r['workflow'] or r['file']} ({r['file']}): {len(r['findings'])} finding(s)")
         for x in r["findings"]:

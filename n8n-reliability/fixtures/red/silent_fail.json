@@ -1,0 +1,1 @@
+{"name":"Lead mail","nodes":[{"id":"c1","name":"Schedule","type":"n8n-nodes-base.scheduleTrigger","parameters":{}},{"id":"c2","name":"Send mail","type":"n8n-nodes-base.gmail","onError":"continueRegularOutput","parameters":{"operation":"send"}}],"connections":{"Schedule":{"main":[[{"node":"Send mail","type":"main","index":0}]]}},"settings":{"errorWorkflow":"42"}}

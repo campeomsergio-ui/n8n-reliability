@@ -1,0 +1,1 @@
+{"name":"Nightly sync","nodes":[{"id":"b1","name":"Schedule","type":"n8n-nodes-base.scheduleTrigger","parameters":{}},{"id":"b2","name":"Append row","type":"n8n-nodes-base.googleSheets","parameters":{"operation":"append"}}],"connections":{"Schedule":{"main":[[{"node":"Append row","type":"main","index":0}]]}},"settings":{"errorWorkflow":"42"}}

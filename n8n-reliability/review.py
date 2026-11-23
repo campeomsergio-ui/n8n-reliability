@@ -111,8 +111,35 @@ def review(wf):
     has_error_route = bool((wf.get("settings") or {}).get("errorWorkflow")) or any(
         n.get("type", "").endswith("errorTrigger") for n in nodes)
     if writes and not has_error_route:
-        add("NO_ERROR_ROUTE", "medium", None, "No error workflow is set, so a failed run alerts nobody.",
+        add("NO_ERROR_ROUTE", "medium", None, "No workflow-level error handler was found in the export, so a failed run may alert nobody.",
             "Set Settings > Error workflow to a workflow that starts with an Error Trigger and notifies a person.")
+
+    kids = {}
+    for src, outs in conns.items():
+        for branch in outs.get("main", []):
+            for edge in branch or []:
+                kids.setdefault(src, set()).add(edge["node"])
+    responders = {n["name"] for n in nodes if n.get("type", "").endswith("respondToWebhook") and not n.get("disabled")}
+    for hook in nodes:
+        if hook.get("type", "").endswith(".webhook") and (hook.get("parameters") or {}).get("responseMode") == "responseNode" and not hook.get("disabled"):
+            # Any route that ends (no children) before a responder returns n8n's default reply, not yours.
+            stack, seen, leaks = [hook["name"]], set(), False
+            while stack and not leaks:
+                cur = stack.pop()
+                if cur in responders:
+                    continue
+                nxt = kids.get(cur, set())
+                branches = (conns.get(cur) or {}).get("main") or []
+                if not nxt or any(not b for b in branches):  # a listed but empty output ends that route
+                    leaks = True
+                for k in nxt - seen:
+                    seen.add(k); stack.append(k)
+            if not responders:
+                add("NO_WEBHOOK_RESPONSE", "high", hook, "The webhook is set to answer from a Respond to Webhook node, but the workflow has none, so callers never get the reply you intended.",
+                    "Add a Respond to Webhook node on every route, or set Respond to 'Immediately'.")
+            elif leaks:
+                add("NO_WEBHOOK_RESPONSE", "medium", hook, "At least one route from this webhook ends without reaching Respond to Webhook.",
+                    "Put a Respond to Webhook node at the end of every route, including error and filtered branches.")
 
     for n in writes:
         op = str((n.get("parameters") or {}).get("operation", "")).lower()
@@ -122,8 +149,13 @@ def review(wf):
                 "Send an Idempotency-Key derived from a stable event ID, or switch to upsert. If neither is possible, turn retry off.")
         triggers = [a for a in ancestors(n["name"], conns) if a in by_name and is_event_trigger(by_name[a])]
         if triggers and not guarded and undeduped_path(n["name"], triggers, conns, by_name):
-            add("REPLAY_WRITE", "high", n, "An event trigger reaches this write on a path with no cross-execution dedupe and no stable key. Providers redeliver events, and each delivery writes again.",
+            add("REPLAY_WRITE", "high", n, "An event trigger can reach this write on a path with no cross-execution dedupe and no stable key. If the provider redelivers the event, it can be written twice.",
                 "Add Remove Duplicates (across executions) keyed on the event ID before the write, or use upsert on the event ID.")
+        if n.get("onError") == "continueErrorOutput":
+            outs = (conns.get(n["name"]) or {}).get("main") or []
+            if len(outs) < 2 or not outs[1]:
+                add("UNWIRED_ERROR_OUTPUT", "medium", n, "Errors go to the error output, but nothing is connected to it, so failed items are dropped.",
+                    "Connect the error output to an alert, a retry queue or Stop And Error.")
         if silent_fail(n):
             add("SILENT_FAIL", "medium", n, "Errors continue down the success path, so a failed write looks like a success.",
                 "Use 'Continue (using error output)' and connect the error output to an alert, or stop the workflow.")

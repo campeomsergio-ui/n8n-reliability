@@ -5,7 +5,7 @@ A Claude skill that statically reviews exported n8n workflows for duplicate writ
     python3 review.py workflow.json
     python3 review.py workflow.json --format json   # or --format github for CI annotations
     python3 tests/test_pairs.py               # 4 red/green fixture pairs
-    python3 tests/test_review_regressions.py  # 8 more pairs: header really sent, stable keys, dedupe on every path, onError precedence
+    python3 tests/test_review_regressions.py  # 11 more pairs: header really sent, stable keys, dedupe on every path, onError precedence, unwired error output, webhook responder
 
 The fixtures are synthetic.
 

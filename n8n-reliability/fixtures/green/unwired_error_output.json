@@ -1,0 +1,57 @@
+{
+  "name": "Fixture",
+  "nodes": [
+    {
+      "id": "t",
+      "name": "Manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "parameters": {}
+    },
+    {
+      "id": "w",
+      "name": "Write",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.example.test/x"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "s",
+      "name": "Fail execution",
+      "type": "n8n-nodes-base.stopAndError",
+      "parameters": {
+        "errorMessage": "Write failed"
+      }
+    }
+  ],
+  "connections": {
+    "Manual": {
+      "main": [
+        [
+          {
+            "node": "Write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Fail execution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "errorWorkflow": "x"
+  }
+}

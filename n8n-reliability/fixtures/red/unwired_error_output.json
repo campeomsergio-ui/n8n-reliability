@@ -1,0 +1,37 @@
+{
+  "name": "Fixture",
+  "nodes": [
+    {
+      "id": "t",
+      "name": "Manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "parameters": {}
+    },
+    {
+      "id": "w",
+      "name": "Write",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.example.test/x"
+      },
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "connections": {
+    "Manual": {
+      "main": [
+        [
+          {
+            "node": "Write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "errorWorkflow": "x"
+  }
+}

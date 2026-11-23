@@ -18,6 +18,9 @@ EXPECTATIONS = {
     "postgres_upsert_current": ({"REPLAY_WRITE"}, set()),
     "postgres_upsert_legacy": ({"REPLAY_WRITE"}, set()),
     "on_error_overrides_legacy": ({"SILENT_FAIL"}, set()),
+    "unwired_error_output": ({"UNWIRED_ERROR_OUTPUT"}, set()),
+    "webhook_response_bypassed": ({"NO_WEBHOOK_RESPONSE"}, set()),
+    "webhook_no_responder": ({"NO_WEBHOOK_RESPONSE"}, set()),
 }
 
 

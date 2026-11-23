@@ -1,0 +1,54 @@
+{
+  "name": "Fixture",
+  "nodes": [
+    {
+      "id": "h",
+      "name": "Hook",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {
+        "path": "x",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "i",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "parameters": {}
+    },
+    {
+      "id": "r",
+      "name": "Reply",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Hook": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "errorWorkflow": "x"
+  }
+}

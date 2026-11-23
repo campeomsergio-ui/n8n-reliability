@@ -15,10 +15,12 @@ Reads exported workflow files only. It never imports, activates or runs a workfl
 5. End with a replay test table. Give one row per high finding: the action (send the same event twice, or force a timeout after the write), the expected result (one record) and where to check.
 
 ## Checks
-- RETRY_WRITE (high): retry on fail is enabled on a write that has no idempotency key.
-- REPLAY_WRITE (high): an event trigger (webhook or app trigger) feeds an insert/create/POST with no Remove Duplicates step, idempotency key or upsert.
-- SILENT_FAIL (medium): a write is set to continue on error through the regular output.
+- RETRY_WRITE (high): retry on fail is on for a write (POST/PUT/PATCH/DELETE, or a create/insert/send-style operation) with no sent Idempotency-Key header. Upsert, update and delete are treated as retry-safe.
+- REPLAY_WRITE (high): an event trigger (webhook or app trigger) reaches a write by some path that skips a Remove Duplicates node set to "previous executions" with a dedupe value, and the write has no stable Idempotency-Key and is not an upsert on a stable key. Keys built from `$execution`, `$now`, random values or UUIDs count as unstable.
+- SILENT_FAIL (medium): a write continues on error through the regular output (`onError` wins over the older `continueOnFail`).
 - NO_ERROR_ROUTE (medium): the workflow writes but has no error workflow.
 
+`--format json` prints machine-readable findings; `--format github` prints GitHub Actions annotations.
+
 ## Limits
-Static heuristics only. A clean report means none of these four patterns were found. It does not mean the workflow is reliable. Write detection relies on the HTTP method or the node's `operation` value, so custom or community nodes can be missed.
+Static heuristics only. A clean report means none of these four patterns were found. It does not mean the workflow is reliable. Write detection relies on the HTTP method or the node's `operation` value, so custom or community nodes can be missed. If you want a person to fix what it finds: https://guraforge.com

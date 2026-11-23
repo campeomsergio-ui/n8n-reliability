@@ -1,0 +1,76 @@
+{
+  "name": "dedupe_bypass_branch (green)",
+  "active": false,
+  "nodes": [
+    {
+      "id": "event",
+      "name": "Event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "payments"
+      }
+    },
+    {
+      "id": "remove-duplicates",
+      "name": "Remove Duplicates",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "dedupeValue": "={{ $json.body.event_id }}"
+      }
+    },
+    {
+      "id": "write",
+      "name": "Write",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.example.test/payments"
+      }
+    }
+  ],
+  "connections": {
+    "Event": {
+      "main": [
+        [
+          {
+            "node": "Remove Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Duplicates": {
+      "main": [
+        [
+          {
+            "node": "Write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "fixture-error-handler"
+  }
+}

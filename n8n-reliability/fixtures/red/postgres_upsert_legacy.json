@@ -1,0 +1,72 @@
+{
+  "name": "postgres_upsert_legacy (red)",
+  "active": false,
+  "nodes": [
+    {
+      "id": "event",
+      "name": "Event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "payments"
+      }
+    },
+    {
+      "id": "upsert-payment",
+      "name": "Upsert payment",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "mode": "list",
+          "value": "payments"
+        },
+        "dataMode": "defineBelow",
+        "columnToMatchOn": "event_id",
+        "valueToMatchOn": "={{ $execution.id }}",
+        "valuesToSend": {
+          "values": [
+            {
+              "column": "status",
+              "value": "paid"
+            }
+          ]
+        }
+      },
+      "retryOnFail": true
+    }
+  ],
+  "connections": {
+    "Event": {
+      "main": [
+        [
+          {
+            "node": "Upsert payment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "fixture-error-handler"
+  }
+}

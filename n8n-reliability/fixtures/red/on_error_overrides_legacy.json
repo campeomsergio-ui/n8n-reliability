@@ -1,0 +1,49 @@
+{
+  "name": "on_error_overrides_legacy (red)",
+  "active": false,
+  "nodes": [
+    {
+      "id": "manual",
+      "name": "Manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "write",
+      "name": "Write",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.example.test/payments"
+      },
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Manual": {
+      "main": [
+        [
+          {
+            "node": "Write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "fixture-error-handler"
+  }
+}

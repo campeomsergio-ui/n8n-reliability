@@ -15,13 +15,72 @@ def is_write(n):
     return str(p.get("operation", "")).lower() in WRITE_OPS
 
 
+VOLATILE_KEY = ("$execution", "$now", "$today", "$runindex", "math.random", "$randomint", "uuid", "date.now")
+
+
+def stable(value):
+    v = str(value or "").lower()
+    return bool(v.strip()) and not any(t in v for t in VOLATILE_KEY)
+
+
 def has_idempotency(n):
-    return "idempotency" in json.dumps(n.get("parameters") or {}).lower()
+    """An Idempotency-Key header that is actually sent, with a value that repeats on redelivery."""
+    p = n.get("parameters") or {}
+    if not n.get("type", "").endswith(".httpRequest") or not p.get("sendHeaders"):
+        return False
+    rows = (p.get("headerParameters") or {}).get("parameters") or []
+    return any(str(h.get("name", "")).strip().lower() == "idempotency-key" and stable(h.get("value")) for h in rows if isinstance(h, dict))
+
+
+def upsert_key(n):
+    """Match value of an upsert, current (columns.matchingColumns) or legacy (valueToMatchOn) shape."""
+    p = n.get("parameters") or {}
+    if "valueToMatchOn" in p:
+        return p["valueToMatchOn"]
+    cols = p.get("columns") or {}
+    match, vals = cols.get("matchingColumns") or [], cols.get("value") or {}
+    return " ".join(str(vals.get(c, "")) for c in match) if match else None
+
+
+def replay_safe_op(n):
+    op = str((n.get("parameters") or {}).get("operation", "")).lower()
+    if op == "upsert":
+        key = upsert_key(n)
+        return key is None or stable(key)  # no visible key: trust the node's own matching
+    return op in REPLAY_SAFE_OPS
+
+
+def is_dedupe(n):
+    p = n.get("parameters") or {}
+    return n.get("type", "").endswith("removeDuplicates") and p.get("operation") == "removeItemsSeenInPreviousExecutions" and stable(p.get("dedupeValue"))
+
+
+def silent_fail(n):
+    if "onError" in n:
+        return n["onError"] == "continueRegularOutput"
+    return bool(n.get("continueOnFail"))
 
 
 def is_event_trigger(n):
     t = n.get("type", "")
     return (t.endswith(".webhook") or t.endswith("Trigger")) and not t.endswith(NON_EVENT_TRIGGERS)
+
+
+def undeduped_path(target, starts, conns, by_name):
+    """True if some trigger reaches target without passing a cross-execution dedupe node."""
+    kids = {}
+    for src, outs in conns.items():
+        for branch in outs.get("main", []):
+            for edge in branch or []:
+                kids.setdefault(src, set()).add(edge["node"])
+    seen, stack = set(starts), list(starts)
+    while stack:
+        for k in kids.get(stack.pop(), ()):
+            if k == target:
+                return True
+            if k not in seen and not (k in by_name and is_dedupe(by_name[k])):
+                seen.add(k); stack.append(k)
+    return False
 
 
 def ancestors(name, conns):
@@ -56,35 +115,56 @@ def review(wf):
             "Set Settings > Error workflow to a workflow that starts with an Error Trigger and notifies a person.")
 
     for n in writes:
-        p = n.get("parameters") or {}
-        op = str(p.get("operation", "")).lower()
-        guarded = has_idempotency(n)
-        if n.get("retryOnFail") and not guarded:
+        op = str((n.get("parameters") or {}).get("operation", "")).lower()
+        guarded = has_idempotency(n) or replay_safe_op(n)
+        if n.get("retryOnFail") and not (guarded or op in REPLAY_SAFE_OPS):
             add("RETRY_WRITE", "high", n, f"Retry on fail is on (max tries {n.get('maxTries', 3)}) for a write with no idempotency key. A timeout after a successful write can create duplicates.",
                 "Send an Idempotency-Key derived from a stable event ID, or switch to upsert. If neither is possible, turn retry off.")
-        ups = {by_name[a].get("type", "") for a in ancestors(n["name"], conns) if a in by_name}
-        event_fed = any(is_event_trigger(by_name[a]) for a in ancestors(n["name"], conns) if a in by_name)
-        deduped = any(t.endswith("removeDuplicates") for t in ups)
-        if event_fed and not (deduped or guarded or op in REPLAY_SAFE_OPS):
-            add("REPLAY_WRITE", "high", n, "An event trigger feeds this write with no dedupe step. Providers redeliver events, and each delivery writes again.",
+        triggers = [a for a in ancestors(n["name"], conns) if a in by_name and is_event_trigger(by_name[a])]
+        if triggers and not guarded and undeduped_path(n["name"], triggers, conns, by_name):
+            add("REPLAY_WRITE", "high", n, "An event trigger reaches this write on a path with no cross-execution dedupe and no stable key. Providers redeliver events, and each delivery writes again.",
                 "Add Remove Duplicates (across executions) keyed on the event ID before the write, or use upsert on the event ID.")
-        if n.get("continueOnFail") or n.get("onError") == "continueRegularOutput":
+        if silent_fail(n):
             add("SILENT_FAIL", "medium", n, "Errors continue down the success path, so a failed write looks like a success.",
                 "Use 'Continue (using error output)' and connect the error output to an alert, or stop the workflow.")
     return findings
 
 
+USAGE = "usage: review.py WORKFLOW.json [...] [--format md|json|github]"
+
+
 def main(argv):
-    if len(argv) < 2:
-        print("usage: review.py WORKFLOW.json [...]", file=sys.stderr); return 2
-    total = 0
-    for path in argv[1:]:
-        with open(path) as f:
-            wf = json.load(f)
-        fs = review(wf)
+    args, fmt = argv[1:], "md"
+    if "--format" in args:
+        i = args.index("--format")
+        if i + 1 >= len(args) or args[i + 1] not in ("md", "json", "github"):
+            print(USAGE, file=sys.stderr); return 2
+        fmt = args[i + 1]; del args[i:i + 2]
+    if not args or any(a.startswith("-") for a in args):
+        print(USAGE, file=sys.stderr); return 2
+    total, results = 0, []
+    for path in args:
+        try:
+            with open(path, encoding="utf-8") as f:
+                wf = json.load(f)
+            if not isinstance(wf, dict) or not isinstance(wf.get("nodes", []), list):
+                raise ValueError("not an n8n workflow export (expected an object with a nodes list)")
+            fs = review(wf)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+            print(f"{path}: cannot review: {e}", file=sys.stderr); return 2
         total += len(fs)
-        print(f"## {wf.get('name', path)} ({path}): {len(fs)} finding(s)")
-        for x in fs:
+        results.append({"file": path, "workflow": wf.get("name"), "findings": fs})
+    if fmt == "json":
+        print(json.dumps(results, indent=2))
+    for r in results if fmt != "json" else []:
+        if fmt == "github":
+            lvl = {"high": "error", "medium": "warning"}
+            for x in r["findings"]:
+                where = f" [{x['node']}]" if x["node"] else ""
+                print(f"::{lvl.get(x['severity'], 'notice')} file={r['file']},title=n8n-reliability {x['rule']}::{x['finding']}{where} Fix: {x['fix']}")
+            continue
+        print(f"## {r['workflow'] or r['file']} ({r['file']}): {len(r['findings'])} finding(s)")
+        for x in r["findings"]:
             where = f" [{x['node']} / {x['node_id']}]" if x["node"] else ""
             print(f"- {x['severity'].upper()} {x['rule']}{where}: {x['finding']}\n  Fix: {x['fix']}")
     return 1 if total else 0

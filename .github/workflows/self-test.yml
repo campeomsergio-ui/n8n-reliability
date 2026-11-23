@@ -1,0 +1,11 @@
+name: self-test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - working-directory: n8n-reliability
+        run: python3 tests/test_pairs.py && python3 tests/test_review_regressions.py
+      - working-directory: n8n-reliability
+        run: python3 review.py fixtures/red/*.json --format github || [ $? -eq 1 ]
